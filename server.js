@@ -41,6 +41,17 @@ async function verifyAdmin(req, res, next) {
         res.status(403).send({ message: 'Forbidden' });
     }
 }
+// Verify User (Patient) Middleware
+async function verifyUser(req, res, next) {
+    const requester = req.decoded.email;
+    const requesterAccount = await userCollection.findOne({ email: requester });
+    if (requesterAccount.role === 'user' || requesterAccount.role === 'patient') {
+        next();
+    } else {
+        res.status(403).send({ message: 'Forbidden' });
+    }
+}
+
 
 // Verify Hospital Middleware
 async function verifyHospital(req, res, next) {
@@ -58,8 +69,58 @@ async function run() {
         await client.connect();
         const hospitalCollection = client.db('hospital-management').collection('hospitals');
         const userCollection = client.db('hospital-management').collection('users');
+        const appointmentCollection = client.db('hospital-management').collection('appointments');
+
 
         // User Routes
+        app.get('/user/profile', verifyJWT, verifyUser, async (req, res) => {
+            const email = req.decoded.email;
+            const user = await userCollection.findOne({ email: email });
+            res.send(user);
+        });
+
+        app.put('/user/profile', verifyJWT, verifyUser, async (req, res) => {
+            const email = req.decoded.email;
+            const updatedProfile = req.body;
+            const filter = { email: email };
+            const options = { upsert: true };
+            const updateDoc = {
+                $set: updatedProfile,
+            };
+            const result = await userCollection.updateOne(filter, updateDoc, options);
+            res.send(result);
+        });
+
+        app.post('/appointment', verifyJWT, verifyUser, async (req, res) => {
+            const appointment = req.body;
+            const result = await appointmentCollection.insertOne(appointment);
+            res.send(result);
+        });
+
+        app.get('/appointments', verifyJWT, verifyUser, async (req, res) => {
+            const email = req.decoded.email;
+            const query = { patientEmail: email };
+            const appointments = await appointmentCollection.find(query).toArray();
+            res.send(appointments);
+        });
+
+        app.delete('/appointment/:id', verifyJWT, verifyUser, async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: ObjectId(id) };
+            const result = await appointmentCollection.deleteOne(query);
+            res.send(result);
+        });
+
+        app.get('/hospitals/search', verifyJWT, verifyUser, async (req, res) => {
+            const { query } = req.query;
+            const hospitals = await hospitalCollection.find({
+                $or: [
+                    { name: { $regex: query, $options: 'i' } },
+                    { specialties: { $regex: query, $options: 'i' } }
+                ]
+            }).toArray();
+            res.send(hospitals);
+        });
         app.post('/user', async (req, res) => {
             const user = req.body;
             const result = await userCollection.insertOne(user);
